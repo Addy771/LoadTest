@@ -5,16 +5,18 @@
 
 #include <Wire.h> 
 #include <LiquidCrystal_I2C.h>
-#include <Bounce2.h>
+#include <Bounce2.h>	// Albert Phan's fork of Bounce2 library by thomasfredericks https://github.com/AlbertPhan/Bounce2
 
 
 #define SW_VERSION "2.0"
 #define LOOP_INTERVAL 10		// Main code loop period in milliseconds
 #define DISPLAY_INTERVAL 1000	// Display refresh period in milliseconds 
 #define DEBOUNCE_TIME 20		// How many milliseconds must pass before the button is considered stable
-#define REPEAT_INTERVAL 50		// When the button is held down, it takes this long between inc/dec in milliseconds
+#define REPEAT_INTERVAL 200		// When the button is held down, it takes this long between inc/dec in milliseconds
 #define NUM_SAMPLES	32			// Size of circular buffers for analog samples
 #define BUFFER_OPERATOR	0x1F	// Mask used to limit buffer index (0x1F: 0-31)
+#define CURRENT_STEP 5			// Amount to step current (mA) per button press
+#define VOLTAGE_STEP 50			// Amount to step voltage (mV) per button press
 
 // I/O connections
 #define LOAD A2
@@ -58,9 +60,9 @@ void drawResultScreen(unsigned int capacity, unsigned char selectedField);
 
 void clearBuffer(unsigned int * buffer);
 
-Bounce yesBtn(YES_BTN, DEBOUNCE_TIME);
-Bounce upBtn(UP_BTN, DEBOUNCE_TIME);
-Bounce downBtn(DOWN_BTN, DEBOUNCE_TIME);
+Bounce yesBtn(YES_BTN, DEBOUNCE_TIME, REPEAT_INTERVAL);
+Bounce upBtn(UP_BTN, DEBOUNCE_TIME, REPEAT_INTERVAL);
+Bounce downBtn(DOWN_BTN, DEBOUNCE_TIME, REPEAT_INTERVAL);
 
 unsigned long int loopTime;		// Saves the time when the main loop ran
 unsigned long int auxTime;		// Other timers
@@ -86,7 +88,7 @@ void setup() {
 
 	pinMode(PWMOUT, OUTPUT);	// Digital PWM output to R/C filter. Basic DAC
 
-	// Pushbutton inputs
+								// Pushbutton inputs
 	pinMode(YES_BTN, INPUT_PULLUP);
 	pinMode(UP_BTN, INPUT_PULLUP);
 	pinMode(DOWN_BTN, INPUT_PULLUP);
@@ -98,14 +100,9 @@ void setup() {
 	analogWrite(PWMOUT, 0);
 	digitalWrite(PWMOUT, LOW);
 
-	yesBtn.retriggerinterval(REPEAT_INTERVAL);
-	upBtn.retriggerinterval(REPEAT_INTERVAL);
-	downBtn.retriggerinterval(REPEAT_INTERVAL);
-
 	// Initialize LCD
 	lcd.init();
 	lcd.backlight();
-	lcd.blink();
 
 	// Check pushbuttons
 	yesBtn.update();
@@ -115,6 +112,7 @@ void setup() {
 	state = INTRO;
 	enterFlag = 1;
 	loopTime = millis();
+
 
 }
 
@@ -134,11 +132,11 @@ void loop() {
 		shuntVoltages[shuntIndex] = analogRead(SHUNT);		// Take a shunt voltage sample and store it in the circular buffer
 		shuntIndex = (shuntIndex + 1) & BUFFER_OPERATOR;	// Increment the shunt index and wrap around
 
-		// Check pushbuttons. If their states have changed, update the display
+															// Check pushbuttons. If their states have changed, update the display
 
 		yesBtn.update();
 		upBtn.update();
-		downBtn.update();
+		downBtn.update();	// Update button states
 
 
 
@@ -160,7 +158,8 @@ void loop() {
 
 			if (millis() - auxTime >= 3000)
 			{
-				state = CONFIG;
+				lcd.blink();	// Turn on blink after Battery Test screen splash.
+				state = CONFIG; 
 				enterFlag = 1;
 			}
 
@@ -183,20 +182,20 @@ void loop() {
 			// Handle button actions when the CUTOFF item is selected
 			if (selectedItem == CUTOFF)
 			{
-				if (yesBtn.fell())
+				if (yesBtn.fell() || yesBtn.retrigger())
 				{
 					selectedItem = CURRENT;
 					updateFlag = 1;
 				}
 
-				if (cutoffV < MAX_CUTOFF && upBtn.fell())
+				if (cutoffV < MAX_CUTOFF && (upBtn.fell() || upBtn.retrigger()))
 				{
-					cutoffV += 50;
+					cutoffV += VOLTAGE_STEP;
 					updateFlag = 1;
 				}
-				else if (cutoffV > 0 && downBtn.fell())
+				else if (cutoffV > 0 && (downBtn.fell() || downBtn.retrigger()))
 				{
-					cutoffV -= 50;
+					cutoffV -= VOLTAGE_STEP;
 					updateFlag = 1;
 				}
 			}
@@ -209,14 +208,14 @@ void loop() {
 					enterFlag = 1;
 					state = CONFIRM;
 				}
-				if (testCurrent < MAX_CURRENT && upBtn.fell())
+				if (testCurrent < MAX_CURRENT && (upBtn.fell() || upBtn.retrigger()))
 				{
-					testCurrent += 5;
+					testCurrent += CURRENT_STEP;
 					updateFlag = 1;
 				}
-				else if (testCurrent > MIN_CURRENT && downBtn.fell())
+				else if (testCurrent > MIN_CURRENT && (downBtn.fell() || downBtn.retrigger()))
 				{
-					testCurrent -= 5;
+					testCurrent -= CURRENT_STEP;
 					updateFlag = 1;
 				}
 			}
@@ -308,7 +307,7 @@ void loop() {
 				float current = shuntV / SHUNT_R + 0.5f;
 				capacity += current / 4;	// Add to the capacity the amount of current that has been drained in 1/4 of a second (250ms)
 
-				// Capacity (mAh) = Capacity (mAs) / 3600
+											// Capacity (mAh) = Capacity (mAs) / 3600
 				drawTestScreen(loadV, current, capacity / 3600);
 
 				if (loadV < cutoffV)
