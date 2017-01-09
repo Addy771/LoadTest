@@ -8,7 +8,7 @@
 #include <Bounce2.h>	// Albert Phan's fork of Bounce2 library by thomasfredericks https://github.com/AlbertPhan/Bounce2
 
 
-#define SW_VERSION "2.0"
+#define SW_VERSION "2.1"
 #define LOOP_INTERVAL 10		// Main code loop period in milliseconds
 #define DISPLAY_INTERVAL 1000	// Display refresh period in milliseconds 
 #define DEBOUNCE_TIME 20		// How many milliseconds must pass before the button is considered stable
@@ -79,7 +79,7 @@ unsigned int testCurrent;					// Load current setpoint in mA
 unsigned int cutoffV;						// Cutoff voltage in mV
 unsigned char selectedItem;					// Indicates which item is being edited
 unsigned char updateFlag;					// The display is updated when this flag is set
-double capacity;
+double capacity;							// Battery capacity in milliamp-seconds
 
 
 void setup() {
@@ -88,7 +88,7 @@ void setup() {
 
 	pinMode(PWMOUT, OUTPUT);	// Digital PWM output to R/C filter. Basic DAC
 
-								// Pushbutton inputs
+	// Pushbutton inputs
 	pinMode(YES_BTN, INPUT_PULLUP);
 	pinMode(UP_BTN, INPUT_PULLUP);
 	pinMode(DOWN_BTN, INPUT_PULLUP);
@@ -109,6 +109,7 @@ void setup() {
 	upBtn.update();
 	downBtn.update();
 
+	// Begin with the INTRO state
 	state = INTRO;
 	enterFlag = 1;
 	loopTime = millis();
@@ -125,20 +126,15 @@ void loop() {
 	{
 		loopTime += LOOP_INTERVAL;	// The timer will go off in LOOP_INTERVAL milliseconds
 
-
 		loadVoltages[loadIndex] = analogRead(LOAD);			// Take a load voltage sample and store it in the circular buffer
 		loadIndex = (loadIndex + 1) & BUFFER_OPERATOR;		// Increment the buffer index and wrap around
 
 		shuntVoltages[shuntIndex] = analogRead(SHUNT);		// Take a shunt voltage sample and store it in the circular buffer
 		shuntIndex = (shuntIndex + 1) & BUFFER_OPERATOR;	// Increment the shunt index and wrap around
 
-															// Check pushbuttons. If their states have changed, update the display
-
 		yesBtn.update();
 		upBtn.update();
 		downBtn.update();	// Update button states
-
-
 
 		switch (state)
 		{
@@ -149,13 +145,13 @@ void loop() {
 
 				// Make sure PWM output is disabled
 				analogWrite(PWMOUT, 0);
-				//digitalWrite(PWMOUT, LOW);
 
 				auxTime = millis();
 				drawInitScreen();
 
 			}
 
+			// After 3s have passed, change to the CONFIG state
 			if (millis() - auxTime >= 3000)
 			{
 				lcd.blink();	// Turn on blink after Battery Test screen splash.
@@ -176,7 +172,7 @@ void loop() {
 				cutoffV = DEFAULT_CUTOFF;
 				testCurrent = DEFAULT_CURRENT;
 
-				drawConfigScreen(cutoffV, testCurrent, selectedItem);
+				updateFlag = 1;
 			}
 
 			// Handle button actions when the CUTOFF item is selected
@@ -220,6 +216,7 @@ void loop() {
 				}
 			}
 
+			// If the update flag is set, redraw the screen
 			if (updateFlag)
 			{
 				updateFlag = 0;
@@ -269,6 +266,7 @@ void loop() {
 				}
 			}
 
+			// If the update flag is set, redraw the screen
 			if (updateFlag)
 			{
 				updateFlag = 0;
@@ -289,32 +287,33 @@ void loop() {
 				clearBuffer(shuntVoltages);
 
 				drawTestScreen(0, 0, 0);
-				capacity = 0.0;
+				capacity = 0.0;	// Set the capacity measurement to 0 when the test starts
 
 				// Set the analog output so the load draws the set current (0-2V = 0-1000mA)
 				analogWrite(PWMOUT, map(testCurrent, 0, MAX_CURRENT, 0, _2V));
 
-				//********************************* Start load, start timer
 			}
 
+			// Execute this code every 250ms
 			if (millis() - auxTime >= 250)
 			{
 				auxTime += 250;
 
-				loadV = (averageBuffer(loadVoltages) / 1.023) * MAX_LOAD_V;		// Average the buffer of samples and convert ADC counts into millivolts
+				// Average the buffer of samples and convert ADC counts into millivolts
+				loadV = (averageBuffer(loadVoltages) / 1.023) * MAX_LOAD_V;		
 				shuntV = (averageBuffer(shuntVoltages) / 1.023) * MAX_SHUNT_V;
 
 				float current = shuntV / SHUNT_R + 0.5f;
 				capacity += current / 4;	// Add to the capacity the amount of current that has been drained in 1/4 of a second (250ms)
 
-											// Capacity (mAh) = Capacity (mAs) / 3600
+				// Capacity (mAh) = Capacity (mAs) / 3600
 				drawTestScreen(loadV, current, capacity / 3600);
 
+				// Once the battery voltage is below the cutoff, end the test
 				if (loadV < cutoffV)
 				{
 					// Disable load
 					analogWrite(PWMOUT, 0);
-					digitalWrite(PWMOUT, LOW);
 					enterFlag = 1;
 					state = RESULT;
 				}
@@ -333,8 +332,6 @@ void loop() {
 				updateFlag = 1;
 
 			}
-
-
 
 			// Handle button actions when the YES item is selected
 			if (selectedItem == NEW)
@@ -381,11 +378,6 @@ void loop() {
 }
 
 
-
-
-
-
-//*****************************************************************************//
 
 // Battery Tester
 //      V2.0
