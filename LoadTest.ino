@@ -8,14 +8,14 @@
 #include <Bounce2.h>	// Albert Phan's fork of Bounce2 library by thomasfredericks https://github.com/AlbertPhan/Bounce2
 
 
-#define SW_VERSION "2.1"
+#define SW_VERSION "2.2"
 #define LOOP_INTERVAL 10		// Main code loop period in milliseconds
 #define DISPLAY_INTERVAL 1000	// Display refresh period in milliseconds 
 #define DEBOUNCE_TIME 20		// How many milliseconds must pass before the button is considered stable
 #define REPEAT_INTERVAL 200		// When the button is held down, it takes this long between inc/dec in milliseconds
 #define NUM_SAMPLES	32			// Size of circular buffers for analog samples
 #define BUFFER_OPERATOR	0x1F	// Mask used to limit buffer index (0x1F: 0-31)
-#define CURRENT_STEP 5			// Amount to step current (mA) per button press
+#define CURRENT_STEP 50			// Amount to step current (mA) per button press
 #define VOLTAGE_STEP 50			// Amount to step voltage (mV) per button press
 
 // I/O connections
@@ -37,8 +37,8 @@
 #define MIN_CURRENT 50				// Minimum allowed test current in milliamps
 #define MAX_CURRENT 1000			// Maximum allowed test current in milliamps
 #define MAX_CUTOFF	14000			// Maximum cutoff voltage in millivolts
-#define DEFAULT_CUTOFF 3000			// Default cutoff votlage in millivolts
-#define DEFAULT_CURRENT 100			// Default test current in milliamps
+#define DEFAULT_CUTOFF 11400			// Default cutoff voltage in millivolts
+#define DEFAULT_CURRENT 1000			// Default test current in milliamps
 
 #define MILLIS_SEC 1000UL // how many ms in a second
 #define MILLIS_MIN (MILLIS_SEC * 60UL) // how many ms in a minute
@@ -79,6 +79,7 @@ unsigned int testCurrent;					// Load current setpoint in mA
 unsigned int cutoffV;						// Cutoff voltage in mV
 unsigned char selectedItem;					// Indicates which item is being edited
 unsigned char updateFlag;					// The display is updated when this flag is set
+unsigned char confirmCount;
 double capacity;							// Battery capacity in milliamp-seconds
 
 
@@ -155,7 +156,7 @@ void loop() {
 			if (millis() - auxTime >= 3000)
 			{
 				lcd.blink();	// Turn on blink after Battery Test screen splash.
-				state = CONFIG; 
+				state = CONFIG;
 				enterFlag = 1;
 			}
 
@@ -280,6 +281,7 @@ void loop() {
 			if (enterFlag)
 			{
 				enterFlag = 0;
+				confirmCount = 0;
 				auxTime = millis();
 
 				// Reset analog sample buffers
@@ -300,7 +302,7 @@ void loop() {
 				auxTime += 250;
 
 				// Average the buffer of samples and convert ADC counts into millivolts
-				loadV = (averageBuffer(loadVoltages) / 1.023) * MAX_LOAD_V;		
+				loadV = (averageBuffer(loadVoltages) / 1.023) * MAX_LOAD_V;
 				shuntV = (averageBuffer(shuntVoltages) / 1.023) * MAX_SHUNT_V;
 
 				float current = shuntV / SHUNT_R + 0.5f;
@@ -309,8 +311,18 @@ void loop() {
 				// Capacity (mAh) = Capacity (mAs) / 3600
 				drawTestScreen(loadV, current, capacity / 3600);
 
-				// Once the battery voltage is below the cutoff, end the test
+				// Increment a counter each consecutive time the battery is below the threshold      
 				if (loadV < cutoffV)
+				{
+					confirmCount++;
+				}
+				else
+				{
+					confirmCount = 0;
+				}
+
+				// If the battery voltage was below the threshold 5 times in a row, end the test
+				if (confirmCount >= 5)
 				{
 					// Disable load
 					analogWrite(PWMOUT, 0);
